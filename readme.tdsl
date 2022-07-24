@@ -1,0 +1,15 @@
+:mgel
+  mge league.
+  clojure server, only talks to mge server through databases. (sqlite or otherwise)
+  clojure server pretty much only forwards things to challonge api
+
+:mgel/path
+  export active matches to sqlite, somehow get server to sync with that.
+    just display the active matches in chat globally if anyone sends !matches comamnd
+      make add rules follow that sqlite database
+
+
+:mgel/structure
+  invite and open
+  open is anyone on the server. invite is top 12 seeded players.
+

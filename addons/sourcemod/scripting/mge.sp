@@ -420,6 +420,7 @@ public void OnPluginStart()
         Should probably delete this, as the rest of the code doesn't really support hot-loading. */
 
     PrintToChatAll("[MGEMod] Plugin reloaded. Slaying all players to avoid bugs.");
+    char query[256];
 
     for (int i = 1; i <= MaxClients; i++)
     {
@@ -605,6 +606,12 @@ public void OnClientPostAdminCheck(int client)
             strcopy(g_sPlayerSteamID[client], 32, steamid);
             Format(query, sizeof(query), "SELECT rating, hitblip, wins, losses FROM mgemod_stats WHERE steamid='%s' LIMIT 1", steamid);
             db.Query(T_SQLQueryOnConnect, query, client);
+
+            char namesql_dirty[MAX_NAME_LENGTH], namesql[(MAX_NAME_LENGTH * 2) + 1];
+            GetClientName(client, namesql_dirty, sizeof(namesql_dirty));
+            db.Escape(namesql_dirty, namesql, sizeof(namesql));
+            Format(query, sizeof(query), "INSERT INTO players_in_server (name, steamid) VALUES ('%s', '%s')", namesql, g_sPlayerSteamID[client]);
+            db.Query(SQLErrorCheckCallback, query);
         }
     }
 
@@ -618,6 +625,11 @@ public void OnClientPostAdminCheck(int client)
 * -------------------------------------------------------------------------- */
 public void OnClientDisconnect(int client)
 {
+    char query[512];
+    Format(query, sizeof(query), "DELETE FROM players_in_server WHERE steamid='%s'",
+           g_sPlayerSteamID[client]);
+    db.Query(SQLErrorCheckCallback, query);
+
     // We ignore the kick queue check for this function only so that clients that get kicked still get their elo calculated
     if (IsValidClient(client, true) && g_iPlayerArena[client])
     {
@@ -3754,7 +3766,8 @@ void PrepareSQL() // Opens the connection to the database, and creates the table
         db.Query(SQLErrorCheckCallback, "CREATE TABLE IF NOT EXISTS mgemod_duels (winner TEXT, loser TEXT, winnerscore INTEGER, loserscore INTEGER, winlimit INTEGER, gametime INTEGER, mapname TEXT, arenaname TEXT) ");
         db.Query(SQLErrorCheckCallback, "CREATE TABLE IF NOT EXISTS mgemod_duels_2v2 (winner TEXT, winner2 TEXT, loser TEXT, loser2 TEXT, winnerscore INTEGER, loserscore INTEGER, winlimit INTEGER, gametime INTEGER, mapname TEXT, arenaname TEXT) ");
 
-        db.Query(SQLErrorCheckCallback, "CREATE TABLE IF NOT EXISTS players_in_server (player TEXT)");
+        db.Query(SQLErrorCheckCallback, "CREATE TABLE IF NOT EXISTS players_in_server (name TEXT, steamid TEXT)");
+        db.Query(SQLErrorCheckCallback, "DELETE FROM players_in_server WHERE true ");
 
     } else {
         db.Query(SQLErrorCheckCallback, "CREATE TABLE IF NOT EXISTS mgemod_stats (rating INT(4) NOT NULL, steamid VARCHAR(32) NOT NULL, name VARCHAR(64) NOT NULL, wins INT(4) NOT NULL, losses INT(4) NOT NULL, lastplayed INT(11) NOT NULL, hitblip INT(2) NOT NULL) DEFAULT CHARACTER SET utf8 COLLATE utf8_unicode_ci ENGINE = InnoDB ");

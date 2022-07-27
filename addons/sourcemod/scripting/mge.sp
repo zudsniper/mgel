@@ -391,6 +391,8 @@ public void OnPluginStart()
     RegConsoleCmd("spec_prev", Command_Spec);
     RegConsoleCmd("joinclass", Command_JoinClass);
 
+    RegConsoleCmd("tournament", Command_Menu);
+
     RegAdminCmd("loc", Command_Loc, ADMFLAG_BAN, "Shows client origin and angle vectors");
     RegAdminCmd("botme", Command_AddBot, ADMFLAG_BAN, "Add bot to your arena");
     RegAdminCmd("conntest", Command_ConnectionTest, ADMFLAG_BAN, "MySQL connection test");

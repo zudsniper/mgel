@@ -174,6 +174,7 @@
 (def mge-db-fname "../tf/addons/sourcemod/data/sqlite/sourcemod-local.sq3")
 
 (comment (sqlite/query mge-db-fname ["select * from sqlite_schema"])
+         (sqlite/query mge-db-fname ["select * from mgemod_duels"])
          (map str (fs/glob "../tf/addons/sourcemod/data/sqlite" "*"))
          (+ 3 3))
 

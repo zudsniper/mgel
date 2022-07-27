@@ -73,7 +73,8 @@ Handle
     hm_TeammateHP,
     hm_KothTimerBLU,
     hm_KothTimerRED,
-    hm_KothCap;
+    hm_KothCap,
+    hm_Tournament;
 
 // Global Variables
 char g_sMapName[64],
@@ -81,7 +82,8 @@ char g_sMapName[64],
 
 bool g_bBlockFallDamage,
      g_bUseSQLite,
-     g_bAutoCvar;
+     g_bAutoCvar,
+     g_bTournamentMode;
 
 int
     g_iDefaultFragLimit,
@@ -327,6 +329,8 @@ public void OnPluginStart()
     g_bNoDisplayRating = gcvar_noDisplayRating.IntValue ? true : false;
     g_iReconnectInterval = gcvar_reconnectInterval.IntValue;
 
+	g_bTournamentMode = false;
+
     gcvar_dbConfig.GetString(g_sDBConfig, sizeof(g_sDBConfig));
     gcvar_bballParticle_red.GetString(g_sBBallParticleRed, sizeof(g_sBBallParticleRed));
     gcvar_bballParticle_blue.GetString(g_sBBallParticleBlue, sizeof(g_sBBallParticleBlue));
@@ -391,7 +395,7 @@ public void OnPluginStart()
     RegConsoleCmd("spec_prev", Command_Spec);
     RegConsoleCmd("joinclass", Command_JoinClass);
 
-    RegConsoleCmd("tournament", Command_Menu);
+    RegServerCmd("start_tournament", SCommand_Start);
 
     RegAdminCmd("loc", Command_Loc, ADMFLAG_BAN, "Shows client origin and angle vectors");
     RegAdminCmd("botme", Command_AddBot, ADMFLAG_BAN, "Add bot to your arena");
@@ -412,6 +416,7 @@ public void OnPluginStart()
     hm_KothTimerRED = CreateHudSynchronizer();
     hm_KothCap      = CreateHudSynchronizer();
     hm_TeammateHP   = CreateHudSynchronizer();
+    hm_Tournament      = CreateHudSynchronizer();
 
     // Set up the log file for debug logging.
     BuildPath(Path_SM, g_sLogFile, sizeof(g_sLogFile), "logs/mgemod.log");
@@ -432,6 +437,28 @@ public void OnPluginStart()
             g_bCanPlayerGetIntel[i] = true;
         }
     }
+}
+
+public Action SCommand_Start(int args)
+{
+    char arg[128];
+    char full[256];
+ 
+    GetCmdArgString(full, sizeof(full));
+ 
+    PrintToServer("Argument string: %s", full);
+    PrintToServer("Argument count: %d", args);
+ 
+    for (int i = 1; i <= args; i++)
+    {
+        GetCmdArg(i, arg, sizeof(arg));
+        PrintToServer("Argument %d: %s", i, arg);
+    }
+
+	g_bTournamentMode = true;
+	ShowHudToAll();
+ 
+    return Plugin_Handled;
 }
 
 /* OnMapStart()
@@ -1501,6 +1528,10 @@ void ShowPlayerHud(int client)
     if (!g_bShowHud[client])
         return;
 
+	// Tournament Mode
+    SetHudTextParams(-1.0, 0.01, HUDFADEOUTTIME, 255, 100, 100, 255);
+	ShowSyncHudText(client, hm_Tournament, "%s",  g_bTournamentMode ? "TOURNAMENT MODE" : "");
+
     // Score
     SetHudTextParams(0.01, 0.01, HUDFADEOUTTIME, 255, 255, 255, 255);
     char report[128];
@@ -1605,6 +1636,9 @@ void ShowSpecHudToClient(int client)
 {
     if (!IsValidClient(client) || !IsValidClient(g_iPlayerSpecTarget[client]) || !g_bShowHud[client])
         return;
+
+	// Tournament Mode
+	ShowSyncHudText(client, hm_Tournament, "%s",  g_bTournamentMode ? "TOURNAMENT MODE" : "");
 
     int arena_index = g_iPlayerArena[g_iPlayerSpecTarget[client]];
     int red_f1 = g_iArenaQueue[arena_index][SLOT_ONE];

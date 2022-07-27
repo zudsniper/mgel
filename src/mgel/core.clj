@@ -4,7 +4,8 @@
             [babashka.pods :as pods]
             [portal.api :as p]
             [clojure.string :as str]
-            [babashka.fs :as fs]))
+            [babashka.fs :as fs]
+            [babashka.process :refer [process check]]))
 
 (pods/load-pod 'org.babashka/go-sqlite3 "0.1.0")
 (require '[pod.babashka.go-sqlite3 :as sqlite])
@@ -55,15 +56,9 @@
                                                    :tournament_type "double elimination"}}})})))
 
 
-(def current-tourney-id (-> (hc/get (str api-root "/tournaments.json") options)
-                            :body
-                            :data
-                            first
-                            :id))
-
 (defn get-tourney [tourney-id]
   (-> (hc/get (str api-root "/tournaments/" tourney-id ".json")
-           options)
+              options)
       :body))
 
 (defn get-tourney-status [tourney-id]
@@ -105,32 +100,19 @@
              (merge options
                     {:body (generate-string payload)}))))
 
-(def players [{:name "tommy"}
-              {:name "hallu"}
-              {:name "cmingus"}
-              {:name "raphaim"}
-              {:name "ander"}
-              {:name "waki"}
-              {:name "taz"}
-              {:name "nooben"}])
-
-(defn add-all-players [tourney-id]
+(defn add-all-players [tourney-id players]
   (let [payload {:data
                  {:type "Participants"
                   :attributes
                   {:participants
-                   (vec (for [{:keys [name]} players]
-                          {:name name :misc (str name "_steamid")
+                   (vec (for [{:keys [name steamid]} players]
+                          {:name name :misc steamid
                            :seed 1}))}}} ]
     
     (hc/post (str api-root "/tournaments/" tourney-id "/participants/bulk_add.json")
              (merge options
                     {:body (generate-string payload)}))))
 
-
-(comment (add-all-players current-tourney-id)
-
-         (count (get-participants current-tourney-id)))
 
 (defn get-active-matches [tourney-id]
   (let [resp (-> (hc/get (str api-root "/tournaments/" tourney-id "/matches.json")
@@ -153,30 +135,45 @@
                      (map id->steamid)
                      (map (comp :misc :attributes))))))))
 
+(def mge-db-fname "../tf/addons/sourcemod/data/sqlite/sourcemod-local.sq3")
+
+
+(defn run-tourney []
+
+  (def current-tourney-id (or (-> (hc/get (str api-root "/tournaments.json") options)
+                                  :body
+                                  :data
+                                  first
+                                  :id)
+                              (-> (make-tournament)
+                                  :body
+                                  :data
+                                  :id)))
+  (def players (sqlite/query mge-db-fname ["select * from players_in_server"]))
+  (add-all-players current-tourney-id players)
+  
+  )
+
 (defn sync-db [matches]
-  (sqlite/execute! "matches.db"
+  (sqlite/execute! mge-db-fname
                    ["create table if not exists matches (player1 TEXT, player2 TEXT)"])
-  (sqlite/execute! "matches.db"
+  (sqlite/execute! mge-db-fname
                    ["delete from matches where true"])
   (doseq [[player1 player2] matches]
-      (sqlite/execute! "matches.db"
-                       ["insert into matches (player1, player2) values (?, ?)" player1 player2]))
-  (sqlite/query "matches.db"
+    (sqlite/execute! mge-db-fname
+                     ["insert into matches (player1, player2) values (?, ?)" player1 player2]))
+  (sqlite/query mge-db-fname
                 ["select * from matches"]))
-
-
-(sync-db (get-active-matches current-tourney-id))
-
-(get-active-matches current-tourney-id)
-
-(def matches (get-active-matches current-tourney-id))
-
-(def mge-db-fname "../tf/addons/sourcemod/data/sqlite/sourcemod-local.sq3")
 
 (comment (sqlite/query mge-db-fname ["select * from sqlite_schema"])
          (sqlite/query mge-db-fname ["select * from players_in_server"])
          (map str (fs/glob "../tf/addons/sourcemod/data/sqlite" "*"))
          (+ 3 3))
+
+(defn send-server-command [cmd]
+  (process ["screen" "-S" "tf2" "-p" "0" "-X" "stuff" (str cmd "\n")]))
+
+(send-server-command "start_tournament woah woah woah")
 
 (defn foo
   " I don't do a whole lot."

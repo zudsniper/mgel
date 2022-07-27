@@ -8,6 +8,7 @@
                  [cheshire "5.11.0"]
                  [babashka/babashka.pods "0.1.0"]
                  [babashka/fs "0.1.6"]
+                 [babashka/process "0.1.7"]
                  [com.cognitect/transit-clj "1.0.329"]
                  [djblue/portal "0.28.0"]]
   

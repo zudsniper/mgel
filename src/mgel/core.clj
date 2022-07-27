@@ -3,15 +3,10 @@
             [cheshire.core :refer [generate-string]]
             [babashka.pods :as pods]
             [portal.api :as p]
-            [clojure.string :as str]))
-
-
-(def p (p/open))
-
-(add-tap #'p/submit)
+            [clojure.string :as str]
+            [babashka.fs :as fs]))
 
 (pods/load-pod 'org.babashka/go-sqlite3 "0.1.0")
-
 (require '[pod.babashka.go-sqlite3 :as sqlite])
 
 (def api-root "https://api.challonge.com/v2/communities/tf2")
@@ -48,9 +43,7 @@
               :accept :json
               :as :json})
 
-(:body (hc/get "https://api.challonge.com/v2/me.json"
-         options
-         ))
+(comment (:body (hc/get "https://api.challonge.com/v2/me.json" options)))
 
 
 (defn make-tournament []
@@ -73,15 +66,11 @@
            options)
       :body))
 
-(get-tourney current-tourney-id)
-
 (defn get-tourney-status [tourney-id]
   (-> (get-tourney tourney-id)
       :data
       :attributes
       :state))
-
-(get-tourney-status current-tourney-id)
 
 (defn participants-api-url [tourney-id]
   (str api-root "/tournaments/" tourney-id "/participants.json"))
@@ -92,7 +81,8 @@
       :body
       :data))
 
-(map (comp :misc :attributes) (get-participants current-tourney-id))
+(comment
+  (map (comp :misc :attributes) (get-participants current-tourney-id)))
 
 (defn add-participant [tourney-id {:keys [name] :as participant}]
   (let [payload {:data
@@ -181,20 +171,14 @@
 
 (def matches (get-active-matches current-tourney-id))
 
-(def allowed-matches)
-(-> allowed-matches
-    first
-    :attributes
-    
-    
-    )
-(tap> matches)
+(def mge-db-fname "../tf/addons/sourcemod/data/sqlite/sourcemod-local.sq3")
 
-
-
+(comment (sqlite/query mge-db-fname ["select * from sqlite_schema"])
+         (map str (fs/glob "../tf/addons/sourcemod/data/sqlite" "*"))
+         (+ 3 3))
 
 (defn foo
   " I don't do a whole lot."
   [x]
-  (println x "Hello, World!"))))
+  (println x "Hello, World!")) 
 

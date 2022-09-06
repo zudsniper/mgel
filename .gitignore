@@ -2,3 +2,7 @@
 .lein*
 target/
 *.smx
+.DS_Store
+.nrepl-port
+api-key.edn
+token.edn

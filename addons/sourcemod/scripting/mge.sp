@@ -396,6 +396,7 @@ public void OnPluginStart()
     RegConsoleCmd("joinclass", Command_JoinClass);
 
     RegServerCmd("start_tournament", SCommand_Start);
+    RegConsoleCmd("tournament", Command_Tournament);
 
     RegAdminCmd("loc", Command_Loc, ADMFLAG_BAN, "Shows client origin and angle vectors");
     RegAdminCmd("botme", Command_AddBot, ADMFLAG_BAN, "Add bot to your arena");
@@ -3122,6 +3123,14 @@ public Action Command_Remove(int client, int args)
 
     RemoveFromQueue(client, true);
     return Plugin_Handled;
+}
+
+public Action Command_Tournament(int client, int args)
+{
+    if (!IsValidClient(client))
+    {
+	  return Plugin_Continue;
+	}
 }
 
 public Action Command_JoinClass(int client, int args)

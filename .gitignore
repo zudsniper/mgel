@@ -2,3 +2,4 @@
 .lein*
 target/
 *.smx
+api-key.edn

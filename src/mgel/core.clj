@@ -3,19 +3,18 @@
             [cheshire.core :refer [generate-string]]
             [babashka.pods :as pods]
             [portal.api :as p]
-            [clojure.string :as str]))
+            [clojure.string :as str]
+            [clojure.edn :as edn]))
 
+(comment (def p (p/open))
 
-(def p (p/open))
-
-(add-tap #'p/submit)
+         (add-tap #'p/submit))
 
 (pods/load-pod 'org.babashka/go-sqlite3 "0.1.0")
 
 (require '[pod.babashka.go-sqlite3 :as sqlite])
 
 (def api-root "https://api.challonge.com/v2/communities/tf2")
-
 (def client_id "3bd276c270e74d5e90d7482425ee86d68a99898b315379a07432787fca67cfc1")
 (def client_secret "d64234bd3e92d1dbd6cd2950db9c1e6bfd72dc30a68ab3d9fa604a1b63057a51")
 
@@ -25,32 +24,29 @@
                               :client_id client_id
                               :client_secret client_secret}
                 :as :json})
-      :body
-      :access_token))
-#_(tap> (hc/get "https://api.challonge.com/oauth/authorize"
+      :body))
+
+#_ (tap> (hc/get "https://api.challonge.com/oauth/authorize"
               {:query-params {:scope "me tournaments:read matches:read participants:read"
                               :client_id client_id
                               :response_type "code"
                               :community_id "tf2"
                               :redirect_uri "https://oauth.pstmn.io/v1/callback"}}))
 
-(def tokens {:access_token "eyJhbGciOiJIUzUxMiJ9.eyJpc3MiOiJtZ2VsIiwianRpIjoiZDMxOTZmNTAtYWZiNS00NTU0LTg3NmItZGNiN2JkNTYxMDY1IiwiaWF0IjoxNjU4NTQyNDUzLCJleHAiOjE2NTkxNDcyNTMsInVzZXIiOnsiaWQiOjU2NjM1NDMsImVtYWlsIjoidGhtb3JyaXNzQGxpdmUuY29tIiwiYXBwbGljYXRpb25faWQiOjIyNywiZ3JhbnVsYXJfcGVybWlzc2lvbiI6WyIxNTI5OTgiXX19.9dfXNyBfRructJ9N9CgWv_6_8uEXt4pjbwxR61_-pMIQvMhtqXdoz8qJ0DZwOVKc37BmpJv0MoY202DYgVje6Q"
-             , :token_type "Bearer",
-             :expires_in 604800,
-             :refresh_token "b273f1dec3ca19f60d98e99738968673895de8ea284486dfd9e3dac8769edfe5",
-             :scope "me tournaments:read tournaments:write matches:read matches:write participants:read participants:write attachments:read attachments:write communities:manage",
-             :created_at 1658542453})
+(defn make-options [tokens] {:headers {"Authorization-Type" "v2"}
+                             :oauth-token (:access_token tokens)
+                             :content-type "application/vnd.api+json"
+                             :accept :json
+                             :as :json})
 
-(def token (get-oauth-token))
-(def options {:headers {"Authorization-Type" "v2"}
-              :oauth-token (:access_token tokens)
-              :content-type "application/vnd.api+json"
-              :accept :json
-              :as :json})
+(def options (make-options (get-tokens)))
 
-(:body (hc/get "https://api.challonge.com/v2/me.json"
-         options
-         ))
+(defn me [token]
+  (:body (hc/get "https://api.challonge.com/v2/me.json"
+                           (assoc options
+                                  :oauth-token token))))
+
+(me (:oauth-token options))
 
 
 (defn make-tournament []
@@ -70,7 +66,7 @@
 
 (defn get-tourney [tourney-id]
   (-> (hc/get (str api-root "/tournaments/" tourney-id ".json")
-           options)
+              options)
       :body))
 
 (get-tourney current-tourney-id)

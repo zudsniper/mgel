@@ -93,26 +93,43 @@
                     {:body (generate-string payload)}))))
 
 
+(defn flatten-keys* [a ks m]
+  "http://blog.jayfields.com/2010/09/clojure-flatten-keys.html"
+  (if (map? m)
+    (reduce into (map (fn [[k v]] (flatten-keys* a (conj ks k) v)) (seq m)))
+    (assoc a (keyword (clojure.string/join "." (map name ks))) m)))
+
+(defn flatten-keys [m] (flatten-keys* {} [] m))
+
+(defn ingest [req]
+  (let [payload (->> req
+                     :body
+                     ((juxt :data :included))
+                     flatten
+                     (map flatten-keys)
+                     (map #(assoc (dissoc % :id) :xt/id (:id %))))]
+    (xt/submit-tx node (for [doc payload]
+                         [::xt/put doc]))))
+
+
+(ingest (hc/get
+         (str api-root "/tournaments/" current-tourney-id "/matches.json") options))
+
+(ingest (hc/get
+         (str api-root "/tournaments.json") options))
+
+
+
 (defn get-active-matches [tourney-id]
-  (let [resp (-> (hc/get (str api-root "/tournaments/" tourney-id "/matches.json")
-                         options)
-                 :body)
-        id->steamid (->> resp
-                         :included
-                         (filter (comp #{"participant"} :type))
-                         (map (juxt (comp #(Integer/parseInt %) :id) identity))
-                         (into {}))]
-    (->> resp
-         :data
-         (filter (comp #{"open"} :state :attributes))
-         (map (fn [x]
-                (->> x
-                     :relationships
-                     ((juxt :player1 :player2))
-                     (map (comp :id :data))
-                     (map #(Integer/parseInt %))
-                     (map id->steamid)
-                     (map (comp :misc :attributes))))))))
+  (ingest (hc/get (str api-root "/tournaments/" tourney-id "/matches.json") options))
+  
+  (xt/q (xt/db node) '{:find [steamid1 steamid2]
+                       :where [[match :type "match"]
+                               [match :attributes.state "open"]
+                               [match :relationships.player1.data.id p1]
+                               [match :relationships.player2.data.id p2]
+                               [p1 :attributes.misc steamid1]
+                               [p2 :attributes.misc steamid2]]}))
 
 (def mge-db-fname "../tf/addons/sourcemod/data/sqlite/sourcemod-local.sq3")
 

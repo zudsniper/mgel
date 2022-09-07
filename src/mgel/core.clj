@@ -108,16 +108,8 @@
                      flatten
                      (map flatten-keys)
                      (map #(assoc (dissoc % :id) :xt/id (:id %))))]
-    (xt/submit-tx node (for [doc payload]
-                         [::xt/put doc]))))
-
-
-(ingest (hc/get
-         (str api-root "/tournaments/" current-tourney-id "/matches.json") options))
-
-(ingest (hc/get
-         (str api-root "/tournaments.json") options))
-
+    (xt/await-tx node (xt/submit-tx node (for [doc payload]
+                                           [::xt/put doc])))))
 
 
 (defn get-active-matches [tourney-id]
@@ -170,14 +162,9 @@
   (prep-sqlite-for-testing)
 
   (def current-tourney-id (or (-> (hc/get (str api-root "/tournaments.json") options)
-                                  :body
-                                  :data
-                                  first
-                                  :id)
+                                  :body :data first :id)
                               (-> (make-tournament)
-                                  :body
-                                  :data
-                                  :id)))
+                                  :body :data :id)))
   
   (def players (sqlite/query mge-db-fname ["select * from players_in_server"]))
   
@@ -188,55 +175,54 @@
   (def matches (get-active-matches current-tourney-id))
   (sync-db matches)
   
-  (comment (while (not-empty (get-active-matches current-tourney-id))))
   ;; TODO simulate these games... to completion using while loop.
   ;; todo rewrite all this code to use the xtdb in memory to store all results from api denormalized... just query.. 
   ;; use metosin FSM library to handle the tournament states...
   
 
   (simulate-game)
-  (def matches-whole (-> (hc/get (str api-root "/tournaments/" current-tourney-id "/matches.json")
-                                 options)
-                         :body))
-  (def players-by-id (->> matches-whole
-                               :included
-                               (filter #(= (:type %) "participant"))
-                               (map (juxt :id identity))
-                               (into {})))
   
-  (def players-by-steamid (->> matches-whole
-                               :included
-                               (filter #(= (:type %) "participant"))
-                               (map (juxt (comp :misc :attributes) identity))
-                               (into {})))
+  (ingest (hc/get (str api-root "/tournaments/" current-tourney-id "/matches.json") options))
   
-  (def matches-by-steamid (->> matches-whole
-                               :data
-                               (filter (comp #{"open"} :state :attributes))
-                               (map (fn [match]
-                                      [#{(-> match :relationships :player1 :data :id players-by-id :attributes :misc)
-                                         (-> match :relationships :player2 :data :id players-by-id :attributes :misc)}
-                                       match]))
-                               (into {})))
+  (defn matches-by-steamid [match] (ffirst (xt/q (xt/db node)
+                                                 '{:find [(pull match [*])]
+                                                   :where [[match :type "match"]
+                                                           [match :attributes.state "open"]
+                                                           [match :relationships.player1.data.id p1]
+                                                           [match :relationships.player2.data.id p2]
+                                                           (or (and [p1 :attributes.misc winnersteamid]
+                                                                    [p2 :attributes.misc losertsteamid])
+                                                               (and [p2 :attributes.misc winnersteamid]
+                                                                    [p1 :attributes.misc losertsteamid]))]
+                                                   :in [winnersteamid losersteamid]}
+                                                 (:winner match)
+                                                 (:loser match))))
+  (defn player-by-steamid [steamid]
+    (ffirst (xt/q (xt/db node) '{:find [(pull p [*])]
+                                 :where [[p :attributes.misc steamid]]
+                                 :in [steamid]}
+                  steamid)))
+  
+  ;; {TODO} test this function, integrate it into the doseq. then make it close loop.
 
   
   ;; convert matches from sqlite into network calls and xtdb database storage..
-  (doseq [match (sqlite/query mge-db-fname ["select * from mgemod_duels"])]
-    (def match match)
-    (def cmatch (matches-by-steamid #{(:winner match) (:loser match)}))
-    (let [match-json [{:participant_id (Integer/parseInt (:id (players-by-steamid (:winner match))))
-                       :score_set (str (:winnerscore match))
+  (doseq [mge-match (sqlite/query mge-db-fname ["select * from mgemod_duels"])]
+    (def mge-match mge-match)
+    (def challonge-match (matches-by-steamid mge-match))
+    (let [match-json [{:participant_id (Integer/parseInt (:xt/id (player-by-steamid (:winner mge-match))))
+                       :score_set (str (:winnerscore mge-match))
                        :advancing true}
                       
-                      {:participant_id (Integer/parseInt (:id (players-by-steamid (:loser match))))
-                       :score_set (str (:loserscore match))
+                      {:participant_id (Integer/parseInt (:xt/id (player-by-steamid (:loser mge-match))))
+                       :score_set (str (:loserscore mge-match))
                        :advancing true}]
           body {:data
                 {:type "Match"
                  :attributes {:match match-json}}}]
-      (hc/put (str api-root "/tournaments/" current-tourney-id "/matches/" (:id cmatch) ".json")
-                    (merge options
-                           {:body (generate-string body)}))))
+      (hc/put (str api-root "/tournaments/" current-tourney-id "/matches/" (:xt/id challonge-match) ".json")
+              (merge options {:body (generate-string body)}))))
+  
   (sqlite/execute! mge-db-fname ["delete from mgemod_duels where true"]))
 
 (defn send-server-command [cmd]

@@ -32,7 +32,8 @@
   (reset! server (http-kit/run-server (inspector-handler node)
                                       {:port 3001 :join? false})))
 
-(comment (start-server))
+(comment (start-server)
+         (stop-server))
 
 
 

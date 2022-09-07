@@ -102,25 +102,32 @@
 
 (defn flatten-keys [m] (flatten-keys* {} [] m))
 
-(defn ingest [req]
+(defn ingest [tid req]
   (let [payload (->> req
                      :body
                      ((juxt :data :included))
+                     (map (fn [res] (cond (map? res) [res] (vector? res) res)))
                      flatten
                      (map flatten-keys)
+                     (map #(assoc % :mgel/tournament-url tid))
                      (map #(assoc (dissoc % :id) :xt/id (:id %))))]
+    (def payload payload)
     (xt/await-tx node (xt/submit-tx node (for [doc payload]
                                            [::xt/put doc])))))
 
 
 (defn get-active-matches [tourney-id]
+  (def tourney-id current-tourney-id)
   (xt/q (xt/db node) '{:find [steamid1 steamid2]
                        :where [[match :type "match"]
+                               [match :mgel/tournament-url tourney-id]
                                [match :attributes.state "open"]
                                [match :relationships.player1.data.id p1]
                                [match :relationships.player2.data.id p2]
                                [p1 :attributes.misc steamid1]
-                               [p2 :attributes.misc steamid2]]}))
+                               [p2 :attributes.misc steamid2]]
+                       :in [tourney-id]}
+        tourney-id))
 
 (def mge-db-fname "../tf/addons/sourcemod/data/sqlite/sourcemod-local.sq3")
 
@@ -156,44 +163,48 @@
   (def match (rand-nth (sqlite/query mge-db-fname ["select * from matches"])))
   (sqlite/execute! mge-db-fname ["insert into mgemod_duels (winner, loser, winnerscore, loserscore, winlimit) values (?,?,?,?,?)" (:player1 match) (:player2 match) 20 18 20]))
 
-(defn matches-by-steamid [match] (ffirst (xt/q (xt/db node)
-                                               '{:find [(pull match [*])]
-                                                 :where [[match :type "match"]
-                                                         [match :attributes.state "open"]
-                                                         [match :relationships.player1.data.id p1]
-                                                         [match :relationships.player2.data.id p2]
-                                                         (or (and [p1 :attributes.misc winnersteamid]
-                                                                  [p2 :attributes.misc losertsteamid])
-                                                             (and [p2 :attributes.misc winnersteamid]
-                                                                  [p1 :attributes.misc losertsteamid]))]
-                                                 :in [winnersteamid losersteamid]}
-                                               (:winner match)
-                                               (:loser match))))
+(defn matches-by-steamid [tourney-id match]
+  (ffirst (xt/q (xt/db node)
+                '{:find [(pull match [*])]
+                  :where [[match :type "match"]
+                          [match :mgel/tournament-url tourney-id]
+                          [match :attributes.state "open"]
+                          [match :relationships.player1.data.id p1]
+                          [match :relationships.player2.data.id p2]
+                          (or (and [p1 :attributes.misc winnersteamid]
+                                   [p2 :attributes.misc losertsteamid])
+                              (and [p2 :attributes.misc winnersteamid]
+                                   [p1 :attributes.misc losertsteamid]))]
+                  :in [winnersteamid losersteamid tourney-id]}
+                (:winner match)
+                (:loser match)
+                tourney-id)))
 
-(defn player-by-steamid [steamid]
+(defn player-by-steamid [tourney-id steamid]
   (ffirst (xt/q (xt/db node) '{:find [(pull p [*])]
-                               :where [[p :attributes.misc steamid]]
-                               :in [steamid]}
-                steamid)))
+                               :where [[p :mgel/tournament-url tourney-id]
+                                       [p :attributes.misc steamid]]
+                               :in [steamid tourney-id]}
+                steamid
+                tourney-id)))
 
 (defn refresh-matches! [tourney-id]
-  (ingest (hc/get (str api-root "/tournaments/" tourney-id "/matches.json") options)))
+  (ingest tourney-id
+          (hc/get (str api-root "/tournaments/" tourney-id "/matches.json") options)))
 
 (def responses (atom []))
-
-(def responses-good responses)
 
 (defn update-match-score! [tourney-id]
   (doseq [mge-match (sqlite/query mge-db-fname ["select * from mgemod_duels"])]
     (def mge-match mge-match)
-    (def challonge-match (matches-by-steamid mge-match))
-    (let [match-json [{:participant_id (Integer/parseInt (:xt/id (player-by-steamid (:winner mge-match))))
+    (def challonge-match (matches-by-steamid tourney-id mge-match))
+    (let [match-json [{:participant_id (Integer/parseInt (:xt/id (player-by-steamid tourney-id (:winner mge-match))))
                        :score_set (str (:winnerscore mge-match))
                        :advancing true}
                       
-                      {:participant_id (Integer/parseInt (:xt/id (player-by-steamid (:loser mge-match))))
+                      {:participant_id (Integer/parseInt (:xt/id (player-by-steamid tourney-id (:loser mge-match))))
                        :score_set (str (:loserscore mge-match))
-                       :advancing true}]
+                       :advancing false}]
           body {:data
                 {:type "Match"
                  :attributes {:match match-json}}}]
@@ -202,27 +213,24 @@
   (sqlite/execute! mge-db-fname ["delete from mgemod_duels where true"]))
 
 
-;; TWO BUGS: one is that sometimes, a match will go 20-0, sometimes 20-18.
-;; another one: does not finish. there are not any open games
-
-;; those were fixed by setting timer to 10 seconds...
-;; TODO
-;; use netflix inspired reliability library to harden these calls...
 
 ;; TODO
 ;; merge with tf2 server
 ;; integration with demo recording and demo 3d player
 (defn start-tourney []
   (prep-sqlite-for-testing)
-
-  (def current-tourney-id (or (-> (hc/get (str api-root "/tournaments.json") options)
-                                  :body :data first :id)
-                              (-> (make-tournament)
-                                  :body :data :id)))
+  
+  (def current-tourney-id (or (-> (make-tournament)
+                                  :body :data :id)
+                              (-> (hc/get (str api-root "/tournaments.json") options)
+                                  :body :data first :id)))
+  
+  
+  (ingest current-tourney-id (hc/get (str api-root "/tournaments/" current-tourney-id ".json") options))
   
   (def players (sqlite/query mge-db-fname ["select * from players_in_server"]))
   
-  (ingest (add-all-players current-tourney-id players))
+  (ingest current-tourney-id (add-all-players current-tourney-id players))
 
   (change-tourney-status current-tourney-id "start")
 
@@ -247,7 +255,11 @@
     (refresh-matches! current-tourney-id)
     (Thread/sleep 500))
   
-  (change-tourney-status current-tourney-id "finalize"))
+  (change-tourney-status current-tourney-id "finalize")
+  
+  (comment
+    (change-tourney-status current-tourney-id "reset")
+    (hc/delete (str api-root "/tournaments/" current-tourney-id ".json") options)))
 
 (defn send-server-command [cmd]
   (process ["screen" "-S" "tf2" "-p" "0" "-X" "stuff" (str cmd "\n")]))

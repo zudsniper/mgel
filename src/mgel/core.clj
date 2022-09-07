@@ -5,8 +5,12 @@
             [portal.api :as p]
             [clojure.string :as str]
             [babashka.fs :as fs]
-            [babashka.process :refer [process check]]))
-            [clojure.edn :as edn]))
+            [babashka.process :refer [process check]]
+            [clojure.edn :as edn]
+            [mgel.oauth :as oauth]
+            [medley.core :refer [index-by]]
+            [xtdb.api :as xt]
+            [mgel.db :refer [node]]))
 
 (comment (def p (p/open))
 
@@ -15,40 +19,11 @@
 (pods/load-pod 'org.babashka/go-sqlite3 "0.1.0")
 (require '[pod.babashka.go-sqlite3 :as sqlite])
 
-(def api-root "https://api.challonge.com/v2/communities/tf2")
-(def client_id "3bd276c270e74d5e90d7482425ee86d68a99898b315379a07432787fca67cfc1")
-(def client_secret "d64234bd3e92d1dbd6cd2950db9c1e6bfd72dc30a68ab3d9fa604a1b63057a51")
+(def api-root (or "https://api.challonge.com/v2" "https://api.challonge.com/v2/communities/tf2"))
 
-(defn get-oauth-token []
-  (-> (hc/post "https://api.challonge.com/oauth/token"
-               {:form-params {:grant_type "client_credentials"
-                              :client_id client_id
-                              :client_secret client_secret}
-                :as :json})
-      :body))
+(def tokens (oauth/get-tokens))
 
-#_ (tap> (hc/get "https://api.challonge.com/oauth/authorize"
-              {:query-params {:scope "me tournaments:read matches:read participants:read"
-                              :client_id client_id
-                              :response_type "code"
-                              :community_id "tf2"
-                              :redirect_uri "https://oauth.pstmn.io/v1/callback"}}))
-
-(defn make-options [tokens] {:headers {"Authorization-Type" "v2"}
-                             :oauth-token (:access_token tokens)
-                             :content-type "application/vnd.api+json"
-                             :accept :json
-                             :as :json})
-
-(def options (make-options (get-tokens)))
-
-(defn me [token]
-  (:body (hc/get "https://api.challonge.com/v2/me.json"
-                           (assoc options
-                                  :oauth-token token))))
-
-(me (:oauth-token options))
-
+(def options (oauth/make-options tokens))
 
 (defn make-tournament []
   (hc/post (str api-root "/tournaments.json")
@@ -94,14 +69,15 @@
                     {:body (generate-string payload)}))))
 
 (defn change-tourney-status [tourney-id new-status]
+  (assert (#{"start" "process_checkin" "abort_checkin" "open_predictions" "finalize" "reset"} new-status))
   (let [payload {:data
                  {:type "TournamentState"
                   :attributes
-                  {:state "start"}}} ]
+                  {:state new-status}}}]
     
-    (hc/post (participants-api-url tourney-id)
-             (merge options
-                    {:body (generate-string payload)}))))
+    (hc/put (str api-root "/tournaments/" tourney-id "/change_state.json")
+            (merge options
+                   {:body (generate-string payload)}))))
 
 (defn add-all-players [tourney-id players]
   (let [payload {:data
@@ -140,8 +116,41 @@
 
 (def mge-db-fname "../tf/addons/sourcemod/data/sqlite/sourcemod-local.sq3")
 
+(defn prep-sqlite-for-testing []
+  (def mge-db-fname "testing.db")
+  
+  (sqlite/execute! mge-db-fname ["create table if not exists players_in_server (name TEXT, steamid TEXT)"])
+  (sqlite/execute! mge-db-fname ["delete from players_in_server where true"])
+  (doseq [name ["tommy" "hallu" "cmingus" "raphaim" "nooben" "taz"]]
+    (sqlite/execute! mge-db-fname ["insert into players_in_server values (?, ?)" name (str name "_steamid")])))
 
-(defn run-tourney []
+
+(defn sync-db [matches]
+  (sqlite/execute! mge-db-fname
+                   ["create table if not exists matches (player1 TEXT, player2 TEXT)"])
+  (sqlite/execute! mge-db-fname
+                   ["CREATE TABLE IF NOT EXISTS mgemod_duels (winner TEXT, loser TEXT, winnerscore INTEGER, loserscore INTEGER, winlimit INTEGER, gametime INTEGER, mapname TEXT, arenaname TEXT)"])
+  (sqlite/execute! mge-db-fname
+                   ["delete from matches where true"])
+  
+  (sqlite/execute! mge-db-fname
+                   ["delete from mgemod_duels where true"])
+  (doseq [[player1 player2] matches]
+    (sqlite/execute! mge-db-fname
+                     ["insert into matches (player1, player2) values (?, ?)" player1 player2]))
+  
+  (sqlite/query mge-db-fname
+                ["select * from matches"]))
+
+(defn simulate-game []
+  (def match (rand-nth (sqlite/query mge-db-fname ["select * from matches"])))
+  (sqlite/execute! mge-db-fname ["insert into mgemod_duels (winner, loser, winnerscore, loserscore, winlimit) values (?,?,?,?,?)" (:player1 match) (:player2 match) 20 18 20]))
+
+
+
+
+(defn start-tourney []
+  (prep-sqlite-for-testing)
 
   (def current-tourney-id (or (-> (hc/get (str api-root "/tournaments.json") options)
                                   :body
@@ -152,26 +161,66 @@
                                   :body
                                   :data
                                   :id)))
-  (def players (sqlite/query mge-db-fname ["select * from players_in_server"]))
-  (add-all-players current-tourney-id players)
   
-  )
+  (def players (sqlite/query mge-db-fname ["select * from players_in_server"]))
+  
+  (add-all-players current-tourney-id players)
 
-(defn sync-db [matches]
-  (sqlite/execute! mge-db-fname
-                   ["create table if not exists matches (player1 TEXT, player2 TEXT)"])
-  (sqlite/execute! mge-db-fname
-                   ["delete from matches where true"])
-  (doseq [[player1 player2] matches]
-    (sqlite/execute! mge-db-fname
-                     ["insert into matches (player1, player2) values (?, ?)" player1 player2]))
-  (sqlite/query mge-db-fname
-                ["select * from matches"]))
+  (change-tourney-status current-tourney-id "start")
 
-(comment (sqlite/query mge-db-fname ["select * from sqlite_schema"])
-         (sqlite/query mge-db-fname ["select * from players_in_server"])
-         (map str (fs/glob "../tf/addons/sourcemod/data/sqlite" "*"))
-         (+ 3 3))
+  (def matches (get-active-matches current-tourney-id))
+  (sync-db matches)
+  
+  (comment (while (not-empty (get-active-matches current-tourney-id))))
+  ;; TODO simulate these games... to completion using while loop.
+  ;; todo rewrite all this code to use the xtdb in memory to store all results from api denormalized... just query.. 
+  ;; use metosin FSM library to handle the tournament states...
+  
+
+  (simulate-game)
+  (def matches-whole (-> (hc/get (str api-root "/tournaments/" current-tourney-id "/matches.json")
+                                 options)
+                         :body))
+  (def players-by-id (->> matches-whole
+                               :included
+                               (filter #(= (:type %) "participant"))
+                               (map (juxt :id identity))
+                               (into {})))
+  
+  (def players-by-steamid (->> matches-whole
+                               :included
+                               (filter #(= (:type %) "participant"))
+                               (map (juxt (comp :misc :attributes) identity))
+                               (into {})))
+  
+  (def matches-by-steamid (->> matches-whole
+                               :data
+                               (filter (comp #{"open"} :state :attributes))
+                               (map (fn [match]
+                                      [#{(-> match :relationships :player1 :data :id players-by-id :attributes :misc)
+                                         (-> match :relationships :player2 :data :id players-by-id :attributes :misc)}
+                                       match]))
+                               (into {})))
+
+  
+  ;; convert matches from sqlite into network calls and xtdb database storage..
+  (doseq [match (sqlite/query mge-db-fname ["select * from mgemod_duels"])]
+    (def match match)
+    (def cmatch (matches-by-steamid #{(:winner match) (:loser match)}))
+    (let [match-json [{:participant_id (Integer/parseInt (:id (players-by-steamid (:winner match))))
+                       :score_set (str (:winnerscore match))
+                       :advancing true}
+                      
+                      {:participant_id (Integer/parseInt (:id (players-by-steamid (:loser match))))
+                       :score_set (str (:loserscore match))
+                       :advancing true}]
+          body {:data
+                {:type "Match"
+                 :attributes {:match match-json}}}]
+      (hc/put (str api-root "/tournaments/" current-tourney-id "/matches/" (:id cmatch) ".json")
+                    (merge options
+                           {:body (generate-string body)}))))
+  (sqlite/execute! mge-db-fname ["delete from mgemod_duels where true"]))
 
 (defn send-server-command [cmd]
   (process ["screen" "-S" "tf2" "-p" "0" "-X" "stuff" (str cmd "\n")]))

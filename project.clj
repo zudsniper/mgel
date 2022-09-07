@@ -10,6 +10,9 @@
                  [babashka/fs "0.1.6"]
                  [babashka/process "0.1.7"]
                  [com.cognitect/transit-clj "1.0.329"]
+                 [medley "1.4.0"]
+                 [com.xtdb/xtdb-core "1.21.0"]
+                 [com.xtdb/xtdb-rocksdb "1.21.0"]
                  [djblue/portal "0.28.0"]]
   
   :repl-options {:init-ns mgel.core})

@@ -6,3 +6,5 @@ target/
 .nrepl-port
 api-key.edn
 token.edn
+data/
+secrets.edn

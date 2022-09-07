@@ -129,7 +129,9 @@
   
   (sqlite/execute! mge-db-fname ["create table if not exists players_in_server (name TEXT, steamid TEXT)"])
   (sqlite/execute! mge-db-fname ["delete from players_in_server where true"])
-  (doseq [name ["tommy" "hallu" "cmingus" "raphaim" "nooben" "taz" "b4nny" "arekk" "habib" "waki" "nano" "delpo"]]
+  (doseq [name (or
+                ["tommy" "hallu" "cmingus" "raphaim" "waki" "nano" "delpo"]
+                ["tommy" "hallu" "cmingus" "raphaim" "nooben" "taz" "b4nny" "arekk" "habib" "waki" "nano" "delpo"])]
     (sqlite/execute! mge-db-fname ["insert into players_in_server values (?, ?)" name (str name "_steamid")])))
 
 
@@ -177,6 +179,10 @@
 (defn refresh-matches! [tourney-id]
   (ingest (hc/get (str api-root "/tournaments/" tourney-id "/matches.json") options)))
 
+(def responses (atom []))
+
+(def responses-good responses)
+
 (defn update-match-score! [tourney-id]
   (doseq [mge-match (sqlite/query mge-db-fname ["select * from mgemod_duels"])]
     (def mge-match mge-match)
@@ -191,11 +197,21 @@
           body {:data
                 {:type "Match"
                  :attributes {:match match-json}}}]
-      (hc/put (str api-root "/tournaments/" tourney-id "/matches/" (:xt/id challonge-match) ".json")
-              (merge options {:body (generate-string body)}))))
+      (swap! responses conj (hc/put (str api-root "/tournaments/" tourney-id "/matches/" (:xt/id challonge-match) ".json")
+                                    (merge options {:body (generate-string body)})))))
   (sqlite/execute! mge-db-fname ["delete from mgemod_duels where true"]))
 
 
+;; TWO BUGS: one is that sometimes, a match will go 20-0, sometimes 20-18.
+;; another one: does not finish. there are not any open games
+
+;; those were fixed by setting timer to 10 seconds...
+;; TODO
+;; use netflix inspired reliability library to harden these calls...
+
+;; TODO
+;; merge with tf2 server
+;; integration with demo recording and demo 3d player
 (defn start-tourney []
   (prep-sqlite-for-testing)
 
@@ -206,7 +222,7 @@
   
   (def players (sqlite/query mge-db-fname ["select * from players_in_server"]))
   
-  (add-all-players current-tourney-id players)
+  (ingest (add-all-players current-tourney-id players))
 
   (change-tourney-status current-tourney-id "start")
 
@@ -226,20 +242,12 @@
 
     (while (not-empty (sqlite/query mge-db-fname ["select * from mgemod_duels"]))
       (update-match-score! current-tourney-id)
-      (Thread/sleep 3000))
+      (Thread/sleep 100))
     
-    (refresh-matches! current-tourney-id))
+    (refresh-matches! current-tourney-id)
+    (Thread/sleep 500))
   
-  ;; TODO simulate these games... to completion using while loop.
-  ;; todo rewrite all this code to use the xtdb in memory to store all results from api denormalized... just query.. 
-  ;; use metosin FSM library to handle the tournament states...
-  
-
-  ;; {TODO} test this function, integrate it into the doseq. then make it close loop.
-
-  
-  ;; convert matches from sqlite into network calls and xtdb database storage..
-  )
+  (change-tourney-status current-tourney-id "finalize"))
 
 (defn send-server-command [cmd]
   (process ["screen" "-S" "tf2" "-p" "0" "-X" "stuff" (str cmd "\n")]))

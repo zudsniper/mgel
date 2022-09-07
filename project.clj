@@ -16,7 +16,9 @@
                  [djblue/portal "0.28.0"]
                  
                  [tatut/xtdb-inspector "6a60f0e04ad0ea3921422f757217a29601146e35"]
-                 [http-kit "2.6.0"]]
+                 [http-kit "2.6.0"]
+                 
+                 [metosin/tilakone "0.0.4"]]
   
   
   :plugins [[reifyhealth/lein-git-down "0.4.1"]]

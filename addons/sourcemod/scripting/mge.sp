@@ -458,6 +458,12 @@ public Action SCommand_Start(int args)
 
 	g_bTournamentMode = true;
 	ShowHudToAll();
+
+    for (int i = 1; i <= MaxClients; i++) {
+        if (IsValidClient(i)) {
+             RemoveFromQueue(i, false);
+	}
+    }
  
     return Plugin_Handled;
 }

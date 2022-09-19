@@ -33,11 +33,15 @@
       (hc/post "https://api.challonge.com/oauth/token"
                {:form-params {:grant_type "refresh_token"
                               :client_id client_id
+                              :client_secret client_secret
                               :refresh_token (:refresh_token tokens)
-                              :redirect_uri redirect_uri}})
+                              :redirect_uri redirect_uri}
+                :as :json})
       ;; TODO (next time token expires), refresh it, save to file
       (println e)))
   tokens)
+
+(def t (hc/get "https://api.challonge.com/v2/me.json" (make-options tokens)))
 
 
 (comment
@@ -50,8 +54,7 @@
          "&community_id=tf2"))
   (= "https://api.challonge.com/oauth/authorize?scope=me tournaments:read tournaments:write matches:read matches:write participants:read participants:write attachments:read attachments:write communities:manage&client_id=3bd276c270e74d5e90d7482425ee86d68a99898b315379a07432787fca67cfc1&redirect_uri=https://oauth.pstmn.io/v1/callback&response_type=code&community_id=tf2")
 
-  (def code "fc44a61bdfb86ca7f46e7e7f14ed92c4f652cf7b12b5cfe43dad9091204fb594")
-  
+  (def code "18de54d08d5e459f9818a349748bfa362573f4d55e07250a770cc72c079b3685")
   (defn get-oauth-token []
     (-> (hc/post "https://api.challonge.com/oauth/token"
                  {:form-params {:grant_type "client_credentials"

@@ -117,7 +117,6 @@
 
 
 (defn get-active-matches [tourney-id]
-  (def tourney-id current-tourney-id)
   (xt/q (xt/db node) '{:find [steamid1 steamid2]
                        :where [[match :type "match"]
                                [match :mgel/tournament-url tourney-id]
@@ -132,7 +131,11 @@
 (def mge-db-fname "../tf/addons/sourcemod/data/sqlite/sourcemod-local.sq3")
 
 (defn prep-sqlite-for-testing []
-  (def mge-db-fname "testing.db")
+  (comment (def mge-db-fname "testing.db"))
+  
+  (sqlite/query mge-db-fname ["select * from players_in_server"])
+  (map :name (sqlite/query mge-db-fname ["select * from sqlite_schema"]))
+  (sqlite/query mge-db-fname ["select * from mgemod_duels"])
   
   (sqlite/execute! mge-db-fname ["create table if not exists players_in_server (name TEXT, steamid TEXT)"])
   (sqlite/execute! mge-db-fname ["delete from players_in_server where true"])
@@ -141,26 +144,27 @@
                 ["tommy" "hallu" "cmingus" "raphaim" "nooben" "taz" "b4nny" "arekk" "habib" "waki" "nano" "delpo"])]
     (sqlite/execute! mge-db-fname ["insert into players_in_server values (?, ?)" name (str name "_steamid")])))
 
-
-(defn sync-db [matches]
+(defn setup-db! []
   (sqlite/execute! mge-db-fname
                    ["create table if not exists matches (player1 TEXT, player2 TEXT)"])
-  (sqlite/execute! mge-db-fname
-                   ["CREATE TABLE IF NOT EXISTS mgemod_duels (winner TEXT, loser TEXT, winnerscore INTEGER, loserscore INTEGER, winlimit INTEGER, gametime INTEGER, mapname TEXT, arenaname TEXT)"])
+  
   (sqlite/execute! mge-db-fname
                    ["delete from matches where true"])
   
   (sqlite/execute! mge-db-fname
-                   ["delete from mgemod_duels where true"])
+                   ["CREATE TABLE IF NOT EXISTS mgemod_duels (winner TEXT, loser TEXT, winnerscore INTEGER, loserscore INTEGER, winlimit INTEGER, gametime INTEGER, mapname TEXT, arenaname TEXT)"])
+  (sqlite/execute! mge-db-fname ["delete from mgemod_duels where true"]))
+
+(defn add-matches-to-db! [matches]
+  (comment (sqlite/query mge-db-fname ["select * from matches"]))
+  (sqlite/execute! mge-db-fname ["delete from matches where true"])
   (doseq [[player1 player2] matches]
     (sqlite/execute! mge-db-fname
-                     ["insert into matches (player1, player2) values (?, ?)" player1 player2]))
-  
-  (sqlite/query mge-db-fname
-                ["select * from matches"]))
+                     ["insert into matches (player1, player2) values (?, ?)" player1 player2])) [matches])
 
 (defn simulate-game []
   (def match (rand-nth (sqlite/query mge-db-fname ["select * from matches"])))
+  
   (sqlite/execute! mge-db-fname ["insert into mgemod_duels (winner, loser, winnerscore, loserscore, winlimit) values (?,?,?,?,?)" (:player1 match) (:player2 match) 20 18 20]))
 
 (defn matches-by-steamid [tourney-id match]
@@ -218,7 +222,9 @@
 ;; merge with tf2 server
 ;; integration with demo recording and demo 3d player
 (defn start-tourney []
-  (prep-sqlite-for-testing)
+  (setup-db!)
+  
+  (comment (prep-sqlite-for-testing))
   
   (def current-tourney-id (or (-> (make-tournament)
                                   :body :data :id)
@@ -243,10 +249,10 @@
     
 
     ;; put active matches into sqlite 
-    (sync-db (get-active-matches current-tourney-id))
+    (add-matches-to-db! (get-active-matches current-tourney-id))
     
     ;; a match is won
-    (simulate-game)
+    (comment (simulate-game))
 
     (while (not-empty (sqlite/query mge-db-fname ["select * from mgemod_duels"]))
       (update-match-score! current-tourney-id)
@@ -264,7 +270,8 @@
 (defn send-server-command [cmd]
   (process ["screen" "-S" "tf2" "-p" "0" "-X" "stuff" (str cmd "\n")]))
 
-(send-server-command "start_tournament woah woah woah")
+(comment
+  (send-server-command "start_tournament woah woah woah"))
 
 (defn foo
   " I don't do a whole lot."

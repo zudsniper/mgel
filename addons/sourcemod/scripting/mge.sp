@@ -464,6 +464,8 @@ public Action SCommand_Start(int args)
              RemoveFromQueue(i, false);
 	}
     }
+    
+    MC_PrintToChatAll("%t", "tournament_start");
  
     return Plugin_Handled;
 }

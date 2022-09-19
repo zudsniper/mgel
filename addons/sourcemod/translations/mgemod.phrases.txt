@@ -6,6 +6,11 @@
 
 "Phrases"
 {
+	"tournament_start" //No colors here.
+	{
+		"en"			"TOURNAMENT MODE starting, go to mge.tf to see bracket"
+	}
+
 	"MenuTitle" //No colors here.
 	{
 		"en"			"Join arena..."
